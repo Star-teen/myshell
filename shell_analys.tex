@@ -1,0 +1,418 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[russian]{babel}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+
+\geometry{left=2cm,right=2cm,top=2cm,bottom=2cm}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2,
+    frame=single,
+    framesep=5pt
+}
+
+\lstset{style=mystyle}
+
+\title{Документация к файлу shell.h \\ Главный заголовочный файл}
+\author{Разработчик: [Ваше имя]}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Данный документ описывает структуру и содержимое главного заголовочного файла \texttt{shell.h}, который содержит все объявления структур данных, констант и функций командного интерпретатора. Файл служит единой точкой входа для всех модулей системы.
+\end{abstract}
+
+\tableofcontents
+
+\section{Обзор файла}
+Файл \texttt{shell.h} является центральным заголовочным файлом проекта, который:
+\begin{itemize}
+    \item Определяет основные структуры данных для представления команд
+    \item Объявляет константы и макросы для ограничений системы
+    \item Содержит прототипы всех функций, используемых в проекте
+    \item Обеспечивает согласованность между модулями
+    \item Предоставляет интерфейс для взаимодействия компонентов системы
+\end{itemize}
+
+\section{Структура файла}
+
+\subsection{Защита от множественного включения}
+\begin{lstlisting}[language=C]
+#ifndef SHELL_H
+#define SHELL_H
+\end{lstlisting}
+
+\textbf{Назначение}: Предотвращение множественного включения заголовочного файла с помощью include guards.
+
+\subsection{Включаемые системные заголовочные файлы}
+\begin{lstlisting}[language=C]
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <errno.h>
+\end{lstlisting}
+
+\textbf{Назначение}: Включение всех необходимых системных заголовочных файлов для обеспечения работы всех модулей системы.
+
+\textbf{Описание включенных файлов}:
+\begin{itemize}
+    \item \texttt{stdio.h} - стандартный ввод/вывод (\texttt{printf}, \texttt{perror})
+    \item \texttt{stdlib.h} - стандартные функции (\texttt{malloc}, \texttt{free}, \texttt{exit})
+    \item \texttt{string.h} - функции работы со строками (\texttt{strcmp}, \texttt{strdup})
+    \item \texttt{unistd.h} - POSIX API (\texttt{fork}, \texttt{exec}, \texttt{chdir})
+    \item \texttt{sys/types.h} - системные типы данных (\texttt{pid\_t})
+    \item \texttt{sys/wait.h} - функции ожидания процессов (\texttt{waitpid})
+    \item \texttt{sys/stat.h} - работа с файловой системой
+    \item \texttt{fcntl.h} - управление файловыми дескрипторами (\texttt{open}, \texttt{O\_CREAT})
+    \item \texttt{signal.h} - обработка сигналов (\texttt{signal}, \texttt{SIGCHLD})
+    \item \texttt{errno.h} - коды ошибок
+\end{itemize}
+
+\section{Константы и макросы}
+
+\subsection{Ограничения системы}
+\begin{lstlisting}[language=C]
+#define MAX_INPUT_LENGTH 4096
+#define MAX_WORDS 100
+#define MAX_PATH_LENGTH 1024
+\end{lstlisting}
+
+\textbf{Назначение}: Определение констант для ограничения размеров данных в системе.
+
+\textbf{Описание констант}:
+\begin{itemize}
+    \item \texttt{MAX\_INPUT\_LENGTH} (4096) - максимальная длина входной строки
+    \item \texttt{MAX\_WORDS} (100) - максимальное количество слов в команде
+    \item \texttt{MAX\_PATH\_LENGTH} (1024) - максимальная длина пути к файлу
+\end{itemize}
+
+\section{Структуры данных}
+
+\subsection{Структура \texttt{command\_t}}
+\begin{lstlisting}[language=C]
+typedef struct {
+    char **words;
+    int word_num;
+    int fonius;      // Фоновый режим
+    char *input_file;    // Файл для ввода
+    char *output_file;   // Файл для вывода stdout
+    char *error_file;    // Файл для вывода stderr
+    int append_output;   // Добавление в файл для stdout
+    int append_error;    // Добавление в файл для stderr
+    int merge_output;    // Объединение stdout и stderr (2>&1)
+    char ***pipeline;    // Команды в конвейере
+    int pipeline_count;  // Количество команд в конвейере
+} command_t;
+\end{lstlisting}
+
+\textbf{Назначение}: Представление разобранной команды со всеми атрибутами и перенаправлениями.
+
+\textbf{Поля структуры}:
+\begin{itemize}
+    \item \texttt{char **words} - массив строк (токенов команды)
+    \item \texttt{int word\_num} - количество токенов в команде
+    \item \texttt{int fonius} - флаг фонового выполнения (1 - фоновая, 0 - foreground)
+    \item \texttt{char *input\_file} - имя файла для перенаправления ввода (\texttt{<})
+    \item \texttt{char *output\_file} - имя файла для перенаправления вывода (\texttt{>}, \texttt{>>})
+    \item \texttt{char *error\_file} - имя файла для перенаправления ошибок (\texttt{2>}, \texttt{2>>})
+    \item \texttt{int append\_output} - флаг дополнения файла вывода (\texttt{>>})
+    \item \texttt{int append\_error} - флаг дополнения файла ошибок (\texttt{2>>})
+    \item \texttt{int merge\_output} - флаг объединения stdout и stderr (\texttt{2>\&1})
+    \item \texttt{char ***pipeline} - трёхмерный массив для представления конвейера команд
+    \item \texttt{int pipeline\_count} - количество команд в конвейере
+\end{itemize}
+
+\subsection{Структура \texttt{command\_sequence\_t}}
+\begin{lstlisting}[language=C]
+typedef struct {
+    command_t **commands;    // Массив команд
+    int command_count;       // Количество команд в последовательности
+    int *separators;         // Разделители между командами (0 - ;, 1 - &&, 2 - ||)
+} command_sequence_t;
+\end{lstlisting}
+
+\textbf{Назначение}: Представление последовательности команд, разделенных операторами.
+
+\textbf{Поля структуры}:
+\begin{itemize}
+    \item \texttt{command\_t **commands} - массив указателей на команды
+    \item \texttt{int command\_count} - общее количество команд в последовательности
+    \item \texttt{int *separators} - массив типов разделителей между командами
+\end{itemize}
+
+\textbf{Коды разделителей}:
+\begin{itemize}
+    \item 0 - точка с запятой (\texttt{;}) - последовательное выполнение
+    \item 1 - логическое И (\texttt{\&\&}) - выполнение при успехе предыдущей
+    \item 2 - логическое ИЛИ (\texttt{||}) - выполнение при ошибке предыдущей
+\end{itemize}
+
+\section{Прототипы функций}
+
+\subsection{Функции парсера}
+\begin{lstlisting}[language=C]
+command_t *parse_input(const char *input);
+command_sequence_t *parse_input_with_separators(const char *input);
+void free_command(command_t *cmd);
+void free_command_sequence(command_sequence_t *seq);
+\end{lstlisting}
+
+\textbf{Назначение}: Функции для разбора входных строк и управления памятью структур команд.
+
+\textbf{Описание функций}:
+\begin{itemize}
+    \item \texttt{parse\_input()} - основной парсер командной строки
+    \item \texttt{parse\_input\_with\_separators()} - парсер для последовательностей команд
+    \item \texttt{free\_command()} - освобождение памяти одной команды
+    \item \texttt{free\_command\_sequence()} - освобождение памяти последовательности команд
+\end{itemize}
+
+\subsection{Функции исполнителя}
+\begin{lstlisting}[language=C]
+int execute_command(command_t *cmd);
+int execute_command_sequence(command_sequence_t *seq);
+int execute_bash_cmd(char **args);
+int execute_fonius(command_t *cmd);
+int execute_pipeline(command_t *cmd);
+\end{lstlisting}
+
+\textbf{Назначение}: Функции для выполнения различных типов команд и управление процессами.
+
+\textbf{Описание функций}:
+\begin{itemize}
+    \item \texttt{execute\_command()} - главная функция выполнения команды
+    \item \texttt{execute\_command\_sequence()} - выполнение последовательности команд
+    \item \texttt{execute\_bash\_cmd()} - диспетчер встроенных команд
+    \item \texttt{execute\_fonius()} - выполнение команд в фоновом режиме
+    \item \texttt{execute\_pipeline()} - выполнение конвейера команд
+\end{itemize}
+
+\subsection{Встроенные команды}
+\begin{lstlisting}[language=C]
+int from_bash_cd(char **args);
+int from_bash_exit(char **args);
+int from_path(char **args);
+int set_path(char **args); 
+int add_to_path(char **args);
+int reset_path(char **args);
+\end{lstlisting}
+
+\textbf{Назначение}: Функции-обработчики встроенных команд shell'а.
+
+\textbf{Описание функций}:
+\begin{itemize}
+    \item \texttt{from\_bash\_cd()} - смена текущей директории
+    \item \texttt{from\_bash\_exit()} - завершение работы shell'а
+    \item \texttt{from\_path()} - вывод значения переменной PATH
+    \item \texttt{set\_path()} - установка нового значения PATH
+    \item \texttt{add\_to\_path()} - добавление директории в PATH
+    \item \texttt{reset\_path()} - сброс PATH к значению по умолчанию
+\end{itemize}
+
+\subsection{Функции отладки и утилиты}
+\begin{lstlisting}[language=C]
+void print_command(const command_t *cmd);
+void print_command_sequence(const command_sequence_t *seq);
+
+char *read_line(void);
+char **split_line(char *line);
+char *get_full_path(const char *command);
+
+int is_command_separator(const char *str);
+int get_separator_type(const char *sep);
+\end{lstlisting}
+
+\textbf{Назначение}: Вспомогательные функции для отладки, ввода/вывода и работы с путями.
+
+\textbf{Описание функций}:
+\begin{itemize}
+    \item \texttt{print\_command()} - вывод отладочной информации о команде
+    \item \texttt{print\_command\_sequence()} - вывод отладочной информации о последовательности
+    \item \texttt{read\_line()} - чтение строки ввода от пользователя
+    \item \texttt{split\_line()} - разделение строки на слова (альтернативная реализация)
+    \item \texttt{get\_full\_path()} - поиск полного пути к исполняемому файлу
+    \item \texttt{is\_command\_separator()} - проверка строки на разделитель команд
+    \item \texttt{get\_separator\_type()} - получение типа разделителя
+\end{itemize}
+
+\section{Завершение заголовочного файла}
+\begin{lstlisting}[language=C]
+#endif
+\end{lstlisting}
+
+\textbf{Назначение}: Завершение блока защиты от множественного включения.
+
+\section{Архитектурные принципы}
+
+\subsection{Модульность}
+Заголовочный файл организован таким образом, чтобы четко разделять:
+\begin{itemize}
+    \item Структуры данных от функций
+    \item Функции парсинга от функций выполнения
+    \item Встроенные команды от внешних
+    \item Основную функциональность от утилит
+\end{itemize}
+
+\subsection{Инкапсуляция}
+\begin{itemize}
+    \item Все структуры данных объявлены в заголовочном файле
+    \item Реализация функций скрыта в соответствующих .c файлах
+    \item Четкие интерфейсы между модулями
+\end{itemize}
+
+\subsection{Расширяемость}
+Система легко расширяема за счет:
+\begin{itemize}
+    \item Добавления новых полей в структуры
+    \item Включения новых функций с соблюдением существующей структуры
+    \item Добавления новых констант без изменения существующего кода
+\end{itemize}
+
+\section{Взаимодействие модулей}
+
+\subsection{Зависимости между модулями}
+\begin{itemize}
+    \item \texttt{main.c} зависит от всех объявлений в \texttt{shell.h}
+    \item \texttt{parcer.c} использует структуры \texttt{command\_t} и \texttt{command\_sequence\_t}
+    \item \texttt{executor.c} зависит от парсера и встроенных команд
+    \item \texttt{cmdfrombash.c} реализует функции, объявленные в \texttt{shell.h}
+\end{itemize}
+
+\subsection{Поток данных}
+\begin{enumerate}
+    \item \texttt{main.c} → Чтение ввода и вызов парсера
+    \item \texttt{parcer.c} → Создание структур команд
+    \item \texttt{executor.c} → Выполнение команд
+    \item \texttt{cmdfrombash.c} → Обработка встроенных команд
+\end{enumerate}
+
+\section{Примеры использования}
+
+\subsection{Создание и использование команды}
+\begin{lstlisting}[language=C]
+#include "shell.h"
+
+int example_usage() {
+    // Парсинг входной строки
+    command_t *cmd = parse_input("ls -la > output.txt");
+    
+    if (cmd != NULL) {
+        // Вывод отладочной информации
+        print_command(cmd);
+        
+        // Выполнение команды
+        int result = execute_command(cmd);
+        
+        // Освобождение памяти
+        free_command(cmd);
+        
+        return result;
+    }
+    return 1;
+}
+\end{lstlisting}
+
+\subsection{Работа с последовательностью команд}
+\begin{lstlisting}[language=C]
+#include "shell.h"
+
+int sequence_example() {
+    // Парсинг последовательности
+    command_sequence_t *seq = parse_input_with_separators("ls && pwd || echo error");
+    
+    if (seq != NULL) {
+        // Вывод отладочной информации
+        print_command_sequence(seq);
+        
+        // Выполнение последовательности
+        int result = execute_command_sequence(seq);
+        
+        // Освобождение памяти
+        free_command_sequence(seq);
+        
+        return result;
+    }
+    return 1;
+}
+\end{lstlisting}
+
+\section{Обработка ошибок и безопасность}
+
+\subsection{Проверки в функциях}
+Все функции, объявленные в заголовочном файле, должны:
+\begin{itemize}
+    \item Проверять входные параметры на NULL
+    \item Возвращать соответствующие коды ошибок
+    \item Корректно обрабатывать граничные случаи
+\end{itemize}
+
+\subsection{Управление памятью}
+\begin{itemize}
+    \item Функции создания структур должны выделять память
+    \item Функции освобождения должны полностью очищать ресурсы
+    \item Избегать утечек памяти при ошибках
+\end{itemize}
+
+\section{Совместимость и переносимость}
+
+\subsection{Стандарты соответствия}
+\begin{itemize}
+    \item POSIX.1-2008 для системных вызовов
+    \item C99 для языка программирования
+    \item Совместимость с Linux и WSL
+\end{itemize}
+
+\subsection{Зависимости от системы}
+\begin{itemize}
+    \item Использование стандартных заголовочных файлов POSIX
+    \item Минимальная зависимость от специфичных функций ОС
+    \item Переносимость между различными UNIX-подобными системами
+\end{itemize}
+
+\section{Заключение}
+Заголовочный файл \texttt{shell.h} является архитектурным ядром всего проекта командного интерпретатора. Он обеспечивает:
+
+\begin{itemize}
+    \item \textbf{Единообразие} - все модули используют одинаковые структуры и интерфейсы
+    \item \textbf{Модульность} - четкое разделение ответственности между компонентами
+    \item \textbf{Расширяемость} - возможность легко добавлять новую функциональность
+    \item \textbf{Надежность} - строгая типизация и проверки на уровне компиляции
+    \item \textbf{Удобство сопровождения} - централизованное управление зависимостями
+\end{itemize}
+
+Благодаря хорошо продуманной структуре \texttt{shell.h}, система обладает высокой степенью связности и низким зацеплением, что делает её устойчивой к изменениям и удобной для разработки и отладки.
+
+\end{document}

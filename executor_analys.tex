@@ -1,0 +1,769 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[russian]{babel}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+
+\geometry{left=2cm,right=2cm,top=2cm,bottom=2cm}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2,
+    frame=single,
+    framesep=5pt
+}
+
+\lstset{style=mystyle}
+
+\title{Документация к файлу executor.c \\ Исполнитель команд}
+\author{Разработчик: [Ваше имя]}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Данный документ описывает структуру и функциональность модуля выполнения команд, реализованного в файле \texttt{executor.c}. Модуль отвечает за выполнение внешних и встроенных команд, управление процессами, обработку конвейеров, последовательностей команд и перенаправлений ввода/вывода.
+\end{abstract}
+
+\tableofcontents
+
+\section{Обзор модуля}
+Файл \texttt{executor.c} реализует сложную систему выполнения команд, включающую:
+\begin{itemize}
+    \item Выполнение внешних команд через поиск в PATH
+    \item Обработку встроенных команд shell'а
+    \item Управление перенаправлениями ввода/вывода
+    \item Реализацию конвейеров (pipes)
+    \item Обработку последовательностей команд с логическими операторами
+    \item Управление фоновыми процессами
+    \item Обработку ошибок и возвращаемых статусов
+\end{itemize}
+
+\section{Структура модуля}
+
+\subsection{Заголовочные файлы}
+\begin{lstlisting}[language=C]
+#include "shell.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <sys/types.h>
+#include <errno.h>
+#include <fcntl.h>
+\end{lstlisting}
+
+\section{Функции управления перенаправлениями}
+
+\subsection{Функция \texttt{apply\_redirections}}
+\begin{lstlisting}[language=C]
+int apply_redirections(command_t *cmd) {
+    // Перенаправление ввода (stdin)
+    if (cmd->input_file != NULL) {
+        int fd = open(cmd->input_file, O_RDONLY);
+        if (fd < 0) {
+            perror("open input");
+            return -1;
+        }
+        
+        if (dup2(fd, STDIN_FILENO) < 0) {
+            perror("dup2 stdin");
+            close(fd);
+            return -1;
+        }
+        close(fd);
+    }
+    
+    // Перенаправление вывода (stdout)
+    if (cmd->output_file != NULL) {
+        int flags = O_WRONLY | O_CREAT;
+        if (cmd->append_output) {
+            flags |= O_APPEND;
+        } else {
+            flags |= O_TRUNC;
+        }
+        
+        int fd = open(cmd->output_file, flags, 0644);
+        if (fd < 0) {
+            perror("open output");
+            return -1;
+        }
+        
+        if (dup2(fd, STDOUT_FILENO) < 0) {
+            perror("dup2 stdout");
+            close(fd);
+            return -1;
+        }
+        close(fd);
+    }
+    
+    // Перенаправление ошибок (stderr)
+    if (cmd->error_file != NULL) {
+        int flags = O_WRONLY | O_CREAT;
+        if (cmd->append_error) {
+            flags |= O_APPEND;
+        } else {
+            flags |= O_TRUNC;
+        }
+        
+        int fd = open(cmd->error_file, flags, 0644);
+        if (fd < 0) {
+            perror("open error");
+            return -1;
+        }
+        
+        if (dup2(fd, STDERR_FILENO) < 0) {
+            perror("dup2 stderr");
+            close(fd);
+            return -1;
+        }
+        close(fd);
+    }
+    
+    // Объединение stderr с stdout
+    if (cmd->merge_output) {
+        if (dup2(STDOUT_FILENO, STDERR_FILENO) < 0) {
+            perror("dup2 merge");
+            return -1;
+        }
+    }
+    
+    return 0;
+}
+\end{lstlisting}
+
+\textbf{Назначение}: Применение всех перенаправлений ввода/вывода для команды.
+
+\textbf{Поддерживаемые перенаправления}:
+\begin{itemize}
+    \item \textbf{Ввод (\texttt{<})}: Открытие файла для чтения в STDIN
+    \item \textbf{Вывод (\texttt{>})}: Создание/перезапись файла для STDOUT
+    \item \textbf{Вывод с дополнением (\texttt{>>})}: Добавление в файл для STDOUT
+    \item \textbf{Ошибки (\texttt{2>})}: Создание/перезапись файла для STDERR
+    \item \textbf{Ошибки с дополнением (\texttt{2>>})}: Добавление в файл для STDERR
+    \item \textbf{Объединение (\texttt{2>\&1})}: Перенаправление STDERR в STDOUT
+\end{itemize}
+
+\textbf{Возвращаемые значения}:
+\begin{itemize}
+    \item 0 - успешное применение перенаправлений
+    \item -1 - ошибка при применении перенаправлений
+\end{itemize}
+
+\section{Функции поиска и выполнения команд}
+
+\subsection{Функция \texttt{get\_full\_path}}
+\begin{lstlisting}[language=C]
+char *get_full_path(const char *command) {
+    if (command == NULL || command[0] == '\0') {
+        return NULL;
+    }
+
+    // Если команда уже содержит абсолютный путь или относительный путь
+    if (command[0] == '/' || (command[0] == '.' && (command[1] == '/' || 
+        (command[1] == '.' && command[2] == '/')))) {
+        if (access(command, X_OK) == 0) {
+            return strdup(command);
+        }
+        return NULL;
+    }
+
+    char *path_env = getenv("PATH");
+    if (path_env == NULL) {
+        return NULL;
+    }
+
+    char *path_copy = strdup(path_env);
+    if (path_copy == NULL) {
+        perror("strdup");
+        return NULL;
+    }
+
+    char *dir = strtok(path_copy, ":");
+    char *found_path = NULL;
+
+    while (dir != NULL) {
+        // Проверка длины пути
+        size_t dir_len = strlen(dir);
+        size_t cmd_len = strlen(command);
+        
+        if (dir_len + cmd_len + 2 > MAX_PATH_LENGTH) {
+            dir = strtok(NULL, ":");
+            continue;
+        }
+
+        char full_path[MAX_PATH_LENGTH];
+        int written = snprintf(full_path, sizeof(full_path), "%s/%s", dir, command);
+        
+        if (written < 0 || written >= (int)sizeof(full_path)) {
+            dir = strtok(NULL, ":");
+            continue;
+        }
+
+        if (access(full_path, X_OK) == 0) {
+            found_path = strdup(full_path);
+            break;
+        }
+
+        dir = strtok(NULL, ":");
+    }
+
+    free(path_copy);
+    return found_path;
+}
+\end{lstlisting}
+
+\textbf{Назначение}: Поиск полного пути к исполняемому файлу команды.
+
+\textbf{Алгоритм поиска}:
+\begin{enumerate}
+    \item Проверка абсолютных и относительных путей
+    \item Поиск в директориях переменной PATH
+    \item Проверка прав доступа на выполнение
+    \item Возврат первого найденного исполняемого файла
+\end{enumerate}
+
+\subsection{Функция \texttt{execute\_external}}
+\begin{lstlisting}[language=C]
+int execute_external(command_t *cmd) {
+    // Находим полный путь к команде
+    char *full_path = get_full_path(cmd->words[0]);
+    if (full_path == NULL) {
+        fprintf(stderr, "%s: command not found\n", cmd->words[0]);
+        return 127;
+    }
+
+    pid_t pid = fork();
+    
+    if (pid == -1) {
+        perror("fork");
+        free(full_path);
+        return 1;
+    } else if (pid == 0) {
+        // Дочерний процесс
+        
+        // ПРИМЕНЯЕМ ПЕРЕНАПРАВЛЕНИЯ
+        if (apply_redirections(cmd) < 0) {
+            fprintf(stderr, "Error: failed to apply redirections\n");
+            free(full_path);
+            exit(1);
+        }
+        
+        execv(full_path, cmd->words);
+        
+        // Если execv вернул управление - произошла ошибка
+        perror("execv");
+        free(full_path);
+        exit(1);
+    } else {
+        // Родительский процесс
+        free(full_path);
+        
+        if (!cmd->fonius) {
+            int status;
+            waitpid(pid, &status, 0);
+            return WEXITSTATUS(status);
+        } else {
+            printf("[%d] Started in fonius\n", pid);
+            return 0;
+        }
+    }
+}
+\end{lstlisting}
+
+\textbf{Назначение}: Выполнение внешней команды.
+
+\textbf{Алгоритм работы}:
+\begin{enumerate}
+    \item Поиск полного пути к команде
+    \item Создание дочернего процесса через \texttt{fork()}
+    \item В дочернем процессе:
+    \begin{itemize}
+        \item Применение перенаправлений
+        \item Замена образа процесса через \texttt{execv()}
+    \end{itemize}
+    \item В родительском процессе:
+    \begin{itemize}
+        \item Ожидание завершения (для foreground процессов)
+        \item Немедленный возврат (для background процессов)
+    \end{itemize}
+\end{enumerate}
+
+\textbf{Возвращаемые значения}:
+\begin{itemize}
+    \item 0-255 - код возврата команды
+    \item 127 - команда не найдена
+\end{itemize}
+
+\section{Функции работы с конвейерами}
+
+\subsection{Функция \texttt{split\_pipeline}}
+\begin{lstlisting}[language=C]
+command_t **split_pipeline(command_t *cmd, int *cmd_count) {
+    // Считаем количество команд в конвейере
+    *cmd_count = 1;
+    for (int i = 0; i < cmd->word_num; i++) {
+        if (strcmp(cmd->words[i], "|") == 0) {
+            (*cmd_count)++;
+        }
+    }
+
+    // Выделяем память для массива команд
+    command_t **commands = malloc(*cmd_count * sizeof(command_t *));
+    if (commands == NULL) {
+        perror("malloc");
+        return NULL;
+    }
+
+    int start = 0;
+    int cmd_index = 0;
+
+    for (int i = 0; i <= cmd->word_num; i++) {
+        // Нашли разделитель или конец массива
+        if (i == cmd->word_num || strcmp(cmd->words[i], "|") == 0) {
+            // Создаем новую команду
+            command_t *new_cmd = malloc(sizeof(command_t));
+            if (new_cmd == NULL) {
+                perror("malloc");
+                // Освобождаем уже созданные команды
+                for (int j = 0; j < cmd_index; j++) {
+                    free_command(commands[j]);
+                }
+                free(commands);
+                return NULL;
+            }
+            // ... инициализация и копирование токенов
+        }
+    }
+    return commands;
+}
+\end{lstlisting}
+
+\textbf{Назначение}: Разделение конвейера на отдельные команды.
+
+\subsection{Функция \texttt{execute\_pipeline}}
+\begin{lstlisting}[language=C]
+int execute_pipeline(command_t *cmd) {
+    int cmd_count;
+    command_t **commands = split_pipeline(cmd, &cmd_count);
+    
+    if (commands == NULL) {
+        return 1;
+    }
+
+    if (cmd_count < 2) {
+        fprintf(stderr, "Invalid pipeline: need at least 2 commands\n");
+        for (int i = 0; i < cmd_count; i++) {
+            free_command(commands[i]);
+        }
+        free(commands);
+        return 1;
+    }
+
+    // Создаем массив pipe'ов
+    int (*pipefds)[2] = malloc((cmd_count - 1) * sizeof(int[2]));
+    if (pipefds == NULL) {
+        perror("malloc");
+        // ... освобождение памяти
+        return 1;
+    }
+
+    // Создаем все pipe'ы
+    for (int i = 0; i < cmd_count - 1; i++) {
+        if (pipe(pipefds[i]) == -1) {
+            perror("pipe");
+            // ... закрытие pipe'ов и освобождение памяти
+            return 1;
+        }
+    }
+
+    // Массив для хранения PID'ов всех процессов
+    pid_t *pids = malloc(cmd_count * sizeof(pid_t));
+    if (pids == NULL) {
+        perror("malloc");
+        // ... освобождение ресурсов
+        return 1;
+    }
+
+    // Создаем процессы для каждой команды
+    for (int i = 0; i < cmd_count; i++) {
+        pids[i] = fork();
+        
+        if (pids[i] == -1) {
+            perror("fork");
+            // Убиваем уже созданные процессы
+            for (int j = 0; j < i; j++) {
+                kill(pids[j], SIGTERM);
+            }
+            // ... освобождение ресурсов
+            return 1;
+        }
+
+        if (pids[i] == 0) {
+            // Дочерний процесс
+            
+            // Подключаем вход
+            if (i > 0) {
+                dup2(pipefds[i-1][0], STDIN_FILENO);
+                close(pipefds[i-1][0]);
+            }
+            
+            // Подключаем выход
+            if (i < cmd_count - 1) {
+                dup2(pipefds[i][1], STDOUT_FILENO);
+                close(pipefds[i][1]);
+            }
+            
+            // Закрываем все pipe'ы в дочернем процессе
+            for (int j = 0; j < cmd_count - 1; j++) {
+                if (j != i - 1) close(pipefds[j][0]);
+                if (j != i) close(pipefds[j][1]);
+            }
+            
+            // ПРИМЕНЯЕМ ПЕРЕНАПРАВЛЕНИЯ ДЛЯ ЭТОЙ КОМАНДЫ
+            if (apply_redirections(commands[i]) < 0) {
+                fprintf(stderr, "Error: failed to apply redirections for command %d\n", i);
+                exit(1);
+            }
+            
+            // Выполняем команду
+            int result = execute_command(commands[i]);
+            
+            // Освобождаем память перед выходом
+            for (int j = 0; j < cmd_count; j++) {
+                if (j != i) free_command(commands[j]);
+            }
+            free(commands);
+            free(pipefds);
+            free(pids);
+            
+            exit(result);
+        }
+    }
+
+    // Родительский процесс - закрываем все pipe'ы
+    for (int i = 0; i < cmd_count - 1; i++) {
+        close(pipefds[i][0]);
+        close(pipefds[i][1]);
+    }
+
+    // Ожидаем завершения всех процессов
+    int last_status = 0;
+    for (int i = 0; i < cmd_count; i++) {
+        int status;
+        waitpid(pids[i], &status, 0);
+        if (i == cmd_count - 1) {  // Сохраняем статус последней команды
+            last_status = WEXITSTATUS(status);
+        }
+    }
+
+    // Освобождаем память
+    free(pipefds);
+    free(pids);
+    for (int i = 0; i < cmd_count; i++) {
+        free_command(commands[i]);
+    }
+    free(commands);
+
+    return last_status;
+}
+\end{lstlisting}
+
+\textbf{Назначение}: Выполнение конвейера команд.
+
+\textbf{Алгоритм работы}:
+\begin{enumerate}
+    \item Разделение конвейера на отдельные команды
+    \item Создание необходимого количества pipe'ов
+    \item Создание процессов для каждой команды
+    \item Настройка перенаправлений между процессами:
+    \begin{itemize}
+        \item Первая команда: STDIN → исходный, STDOUT → pipe1
+        \item Промежуточные: STDIN → pipeN-1, STDOUT → pipeN
+        \item Последняя команда: STDIN → pipeN-1, STDOUT → исходный
+    \end{itemize}
+    \item Ожидание завершения всех процессов
+    \item Возврат статуса последней команды
+\end{enumerate}
+
+\section{Функции работы с последовательностями команд}
+
+\subsection{Функция \texttt{execute\_command\_sequence}}
+\begin{lstlisting}[language=C]
+int execute_command_sequence(command_sequence_t *seq) {
+    if (seq == NULL || seq->command_count == 0) {
+        return 0;
+    }
+
+    // Если только одна команда - выполняем как обычно
+    if (seq->command_count == 1) {
+        return execute_command(seq->commands[0]);
+    }
+
+    int last_status = 0;
+    int should_execute_next = 1; // Флаг: нужно ли выполнять следующую команду
+
+    for (int i = 0; i < seq->command_count; i++) {
+        // Выполняем текущую команду только если нужно
+        int current_status = 0;
+        if (should_execute_next) {
+            current_status = execute_command(seq->commands[i]);
+        } else {
+            // Пропускаем выполнение, но сохраняем статус последней выполненной команды
+            current_status = last_status;
+        }
+        
+        last_status = current_status;
+        
+        // Определяем, нужно ли выполнять следующую команду
+        if (i < seq->command_count - 1) {
+            int separator = seq->separators[i];
+            
+            switch (separator) {
+                case 0: // ; - ВСЕГДА выполняем следующую команду
+                    should_execute_next = 1;
+                    break;
+                    
+                case 1: // && - выполняем следующую только если УСПЕХ (status == 0)
+                    should_execute_next = (current_status == 0);
+                    break;
+                    
+                case 2: // || - выполняем следующую только если ОШИБКА (status != 0)
+                    should_execute_next = (current_status != 0);
+                    break;
+                    
+                default:
+                    fprintf(stderr, "Unknown separator type: %d\n", separator);
+                    should_execute_next = 1;
+                    break;
+            }
+        }
+    }
+
+    return last_status;
+}
+\end{lstlisting}
+
+\textbf{Назначение}: Выполнение последовательности команд с учетом логических операторов.
+
+\textbf{Логика выполнения}:
+\begin{itemize}
+    \item \textbf{; (точка с запятой)}: Всегда выполнять следующую команду
+    \item \textbf{\&\& (логическое И)}: Выполнять следующую команду только при успехе (status = 0)
+    \item \textbf{|| (логическое ИЛИ)}: Выполнять следующую команду только при ошибке (status ≠ 0)
+\end{itemize}
+
+\section{Главная функция выполнения}
+
+\subsection{Функция \texttt{execute\_command}}
+\begin{lstlisting}[language=C]
+int execute_command(command_t *cmd) {
+    if (cmd == NULL || cmd->word_num == 0) {
+        return 0;
+    }
+
+    // Проверяем на наличие разделителей команд в самой команде
+    int has_separators = 0;
+    for (int i = 0; i < cmd->word_num; i++) {
+        if (is_command_separator(cmd->words[i])) {
+            has_separators = 1;
+            break;
+        }
+    }
+    
+    if (has_separators) {
+        // Перестраиваем исходную строку для парсинга последовательности
+        char *reconstructed_input = malloc(MAX_INPUT_LENGTH);
+        if (reconstructed_input == NULL) {
+            perror("malloc");
+            return 1;
+        }
+        
+        reconstructed_input[0] = '\0';
+        
+        // Собираем исходную строку из слов команды
+        for (int j = 0; j < cmd->word_num; j++) {
+            if (j > 0) {
+                strcat(reconstructed_input, " ");
+            }
+            strcat(reconstructed_input, cmd->words[j]);
+        }
+        
+        // Парсим как последовательность команд
+        command_sequence_t *seq = parse_input_with_separators(reconstructed_input);
+        free(reconstructed_input);
+        
+        if (seq != NULL) {
+            int result = execute_command_sequence(seq);
+            free_command_sequence(seq);
+            return result;
+        } else {
+            return 1; // Ошибка парсинга
+        }
+    }
+
+    // Проверяем на конвейер
+    for (int i = 0; i < cmd->word_num; i++) {
+        if (strcmp(cmd->words[i], "|") == 0) {
+            return execute_pipeline(cmd);
+        }
+    }
+
+    // Проверяем встроенные команды
+    int builtin_result = execute_bash_cmd(cmd->words);
+    if (builtin_result != -1) {
+        return builtin_result;
+    }
+
+    // Внешние команды
+    return execute_external(cmd);
+}
+\end{lstlisting}
+
+\textbf{Назначение}: Главная функция выполнения команды, определяющая тип команды и направляющая ее на соответствующий обработчик.
+
+\textbf{Алгоритм определения типа команды}:
+\begin{enumerate}
+    \item Проверка на пустую команду
+    \item Проверка на наличие разделителей команд (последовательность)
+    \item Проверка на наличие конвейера (\texttt{|})
+    \item Проверка на встроенную команду
+    \item Выполнение как внешней команды
+\end{enumerate}
+
+\section{Примеры выполнения}
+
+\subsection{Пример 1: Простая внешняя команда}
+\begin{verbatim}
+Ввод: "ls -la"
+Действие:
+1. Поиск /bin/ls через PATH
+2. fork() + execv()
+3. Ожидание завершения
+4. Возврат статуса
+\end{verbatim}
+
+\subsection{Пример 2: Конвейер}
+\begin{verbatim}
+Ввод: "ls -la | grep test | wc -l"
+Действие:
+1. Создание 2 pipe'ов
+2. Запуск 3 процессов:
+   - ls -la (STDOUT → pipe1)
+   - grep test (STDIN ← pipe1, STDOUT → pipe2) 
+   - wc -l (STDIN ← pipe2)
+3. Ожидание всех процессов
+4. Возврат статуса wc -l
+\end{verbatim}
+
+\subsection{Пример 3: Последовательность с логическими операторами}
+\begin{verbatim}
+Ввод: "ls /nonexistent && echo success || echo failure"
+Действие:
+1. Выполнение ls /nonexistent (ошибка)
+2. Пропуск echo success (из-за &&)
+3. Выполнение echo failure (из-за ||)
+4. Возврат статуса последней команды
+\end{verbatim}
+
+\subsection{Пример 4: Команда с перенаправлениями}
+\begin{verbatim}
+Ввод: "ls -la > output.txt 2> errors.txt"
+Действие:
+1. fork() создает дочерний процесс
+2. В дочернем процессе:
+   - STDOUT → output.txt
+   - STDERR → errors.txt
+   - execv(/bin/ls)
+3. Родитель ожидает завершения
+\end{verbatim}
+
+\section{Особенности реализации}
+
+\subsection{Управление процессами}
+\begin{itemize}
+    \item Корректная обработка fork() и execv()
+    \item Ожидание завершения foreground процессов
+    \item Отслеживание background процессов через обработчик сигналов
+    \item Убийство процессов при ошибках создания конвейера
+\end{itemize}
+
+\subsection{Управление файловыми дескрипторами}
+\begin{itemize}
+    \item Правильное закрытие неиспользуемых pipe'ов
+    \item Корректное применение перенаправлений через dup2()
+    \item Проверка ошибок открытия файлов
+\end{itemize}
+
+\subsection{Обработка ошибок}
+\begin{itemize}
+    \item Проверка возвращаемых значений системных вызовов
+    \item Освобождение памяти при ошибках
+    \item Корректные коды возврата для различных ситуаций
+\end{itemize}
+
+\subsection{Управление памятью}
+\begin{itemize}
+    \item Динамическое выделение памяти для структур команд
+    \item Освобождение всех ресурсов при завершении
+    \item Рекурсивное освобождение вложенных структур
+\end{itemize}
+
+\section{Взаимодействие с другими модулями}
+
+\subsection{Зависимости}
+\begin{itemize}
+    \item \texttt{shell.h} - объявления структур и констант
+    \item \texttt{parcer.c} - предоставляет разобранные структуры команд
+    \item \texttt{cmdfrombash.c} - обработка встроенных команд
+    \item \texttt{main.c} - вызов функции execute\_command()
+\end{itemize}
+
+\subsection{Поток данных}
+\begin{enumerate}
+    \item \texttt{main.c} → Вызов \texttt{execute\_command()}
+    \item \texttt{execute\_command()} → Определение типа команды
+    \item Соответствующий обработчик → Выполнение команды
+    \item Возврат статуса выполнения в \texttt{main.c}
+\end{enumerate}
+
+\section{Заключение}
+Модуль \texttt{executor.c} реализует сложную и надежную систему выполнения команд, которая обеспечивает:
+
+\begin{itemize}
+    \item Полную поддержку выполнения внешних и встроенных команд
+    \item Реализацию конвейеров произвольной длины
+    \item Обработку последовательностей команд с логическими операторами
+    \item Поддержку всех типов перенаправлений ввода/вывода
+    \item Корректное управление процессами и файловыми дескрипторами
+    \item Надежное управление памятью и обработку ошибок
+\end{itemize}
+
+Модуль успешно интегрируется со всеми компонентами системы и обеспечивает выполнение пользовательских команд в соответствии со стандартами UNIX-подобных shell'ов.
+
+\end{document}
