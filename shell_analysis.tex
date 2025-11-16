@@ -1,0 +1,221 @@
+\documentclass[12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[russian]{babel}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{geometry}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{hyperref}
+
+\geometry{a4paper, margin=1in}
+
+\title{Пошаговый разбор кода shell-интерпретатора\\(Практикум №1, группа 216)}
+\author{Автор: Студент}
+\date{\today}
+
+% Настройка подсветки синтаксиса
+\lstset{
+    language=C,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue},
+    commentstyle=\color{green!60!black},
+    stringstyle=\color{red},
+    backgroundcolor=\color{gray!10},
+    frame=single,
+    numbers=left,
+    numberstyle=\tiny,
+    breaklines=true,
+    showstringspaces=false,
+    tabsize=4
+}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+\newpage
+
+\section{Общее описание проекта}
+
+Целью практикума является создание интерактивного командного интерпретатора (shell) на языке C, который:
+\item Разбирает пользовательский ввод на отдельные слова (токены), учитывая кавычки и специальные символы.
+    \item Выполняет команды, используя переменную \texttt{PATH}.
+    \item Поддерживает встроенные команды (например, \texttt{cd}).
+    \item Реализует выполнение команд в фоновом режиме (\texttt{\&}).
+    \item Поддерживает конвейеры (\texttt{|}) неограниченной длины.
+    \item Поддерживает перенаправления (\texttt{>}, \texttt{>>}, \texttt{<}, \texttt{2>}, \texttt{2>>}, \texttt{2\&>1}).
+    \item Поддерживает логические операторы (\texttt{;}, \texttt{\&\&}, \texttt{||}).
+    \item Поддерживает встроенную команду для просмотра/изменения \texttt{PATH}.
+
+Все это соответствует требованиям задания на оценку ``Отлично''.
+
+\section{Архитектура проекта}
+
+Проект разделён на несколько модулей (файлов), что соответствует требованиям задания (отсутствие дублирования кода, модульность).
+
+\item \texttt{shell.h} -- файл заголовков, объявляющий структуры данных и прототипы функций.
+    \item \texttt{parcer.c} -- модуль, отвечающий за разбор пользовательского ввода.
+    \item \texttt{executor.c} -- модуль, отвечающий за выполнение команд.
+    \item \texttt{cmdfrombash.c} -- модуль, содержащий встроенные команды.
+    \item \texttt{main.c} -- точка входа в программу, основной цикл.
+
+\section{Разбор файлов}
+
+\subsection{\texttt{shell.h}}
+
+Этот файл содержит:
+\item Объявления глобальных констант: \texttt{MAX\_INPUT\_LENGTH}, \texttt{MAX\_WORDS}, \texttt{MAX\_PATH\_LENGTH}.
+    \item Определение структур:
+        \begin{itemize}
+            \item \texttt{command\_t} -- представляет собой одну команду, включая:
+                \begin{itemize}
+                    \item \texttt{words} -- массив строк (аргументов команды).
+                    \item \texttt{word\_num} -- количество аргументов.
+                    \item \texttt{fonius} -- флаг фонового режима.
+                    \item \texttt{input\_file, output\_file, error\_file} -- файлы для перенаправлений.
+                    \item \texttt{append\_output, append\_error} -- флаги для \texttt{>>} и \texttt{2>>}.
+                    \item \texttt{merge\_output} -- флаг для \texttt{2\&>1}.
+            \item \texttt{command\_sequence\_t} -- представляет собой последовательность команд, соединённых \texttt{;}, \texttt{\&\&}, \texttt{||}.
+                \item \texttt{commands} -- массив \texttt{command\_t*}.
+                    \item \texttt{separators} -- массив типов разделителей между командами.
+        \end{itemize}
+    \item Прототипы всех функций, используемых в проекте.
+\end{itemize}
+
+\lstinputlisting[language=C, caption={Содержимое shell.h}]{shell.h}
+
+\subsection{\texttt{parcer.c}}
+
+Отвечает за I этап задания: разбор пользовательского ввода.
+
+\subsubsection{Функции}
+
+\item \texttt{is\_special\_char(char c)} -- проверяет, является ли символ специальным (например, \texttt{@}, \texttt{\#}, \texttt{\&}).
+    \item \texttt{is\_redirection\_char(char *str)} -- проверяет, является ли строка символом перенаправления (\texttt{>}, \texttt{>>}, и т.д.).
+    \item \texttt{is\_command\_separator(const char *str)} -- проверяет, является ли строка разделителем команд (\texttt{;}, \texttt{\&\&}, \texttt{||}).
+    \item \texttt{get\_separator\_type(const char *sep)} -- возвращает числовое представление разделителя (0 -- \texttt{;}, 1 -- \texttt{\&\&}, 2 -- \texttt{||}).
+    \item \texttt{parse\_input(const char *input)} -- основная функция разбора строки ввода в структуру \texttt{command\_t}.
+        \begin{itemize}
+            \item Разбирает строку на токены, учитывая кавычки, экранирование, специальные символы.
+            \item Обнаруживает и удаляет символ \texttt{\&} в конце команды, устанавливая флаг \texttt{fonius}.
+            \item Вызывает \texttt{process\_redirections\_and\_pipes} для обработки перенаправлений.
+    \item \texttt{parse\_input\_with\_separators(const char *input)} -- разбирает строку, содержащую разделители команд, на \texttt{command\_sequence\_t}.
+        \item Сначала вызывает \texttt{parse\_input} для полной строки.
+            \item Затем разбивает её на подкоманды по символам \texttt{;}, \texttt{\&\&}, \texttt{||}.
+            \item Копирует информацию о перенаправлениях из исходной команды в каждую подкоманду (через \texttt{copy\_redirections}).
+    \item \texttt{process\_redirections\_and\_pipes(command\_t *cmd, char **words, int *word\_num)} -- выделяет перенаправления из массива токенов и сохраняет в поля структуры \texttt{command\_t}.
+        \item Обнаруживает \texttt{>}, \texttt{>>}, \texttt{<}, \texttt{2>}, \texttt{2>>}, \texttt{2\&>1}.
+            \item Удаляет токены перенаправлений и имен файлов из массива \texttt{words} с помощью \texttt{remove\_words}.
+            \item Заполняет поля \texttt{input\_file}, \texttt{output\_file}, \texttt{error\_file}, и т.д.
+    \item \texttt{remove\_words(char **words, int *count, int start, int num)} -- удаляет \texttt{num} токенов из массива, начиная с индекса \texttt{start}.
+    \item \texttt{copy\_redirections(command\_t *dest, const command\_t *src)} -- копирует поля перенаправлений из одной команды в другую.
+    \item \texttt{free\_command(command\_t *cmd)}, \texttt{free\_command\_sequence(command\_sequence\_t *seq)} -- освобождают память, выделенную под структуры команд.
+\end{itemize}
+
+\lstinputlisting[language=C, caption={Содержимое parcer.c}]{parcer.c}
+
+\subsection{\texttt{executor.c}}
+
+Отвечает за II этап задания: интерпретацию и выполнение команд.
+
+\subsubsection{Функции}
+
+\item \texttt{apply\_redirections(command\_t *cmd)} -- применяет перенаправления к текущему процессу.
+        \begin{itemize}
+            \item Открывает файлы, указанные в \texttt{input\_file}, \texttt{output\_file}, \texttt{error\_file}.
+            \item Использует \texttt{dup2} для перенаправления \texttt{stdin}, \texttt{stdout}, \texttt{stderr}.
+            \item Обрабатывает \texttt{2\&>1} (объединение stderr с stdout).
+    \item \texttt{get\_full\_path(const char *command)} -- ищет исполняемый файл команды в директориях, перечисленных в переменной \texttt{PATH}.
+    \item \texttt{execute\_external(command\_t *cmd)} -- запускает внешнюю команду.
+        \item Находит полный путь к команде.
+            \item Создаёт дочерний процесс с помощью \texttt{fork}.
+            \item В дочернем процессе:
+                \begin{itemize}
+                    \item Применяет перенаправления через \texttt{apply\_redirections}.
+                    \item Вызывает \texttt{execv} для выполнения команды.
+            \item В родительском процессе:
+                \item Ждёт завершения дочернего процесса (если не фоновый).
+                    \item Выводит сообщение о завершении фоновой задачи.
+        \end{itemize}
+    \item \texttt{split\_pipeline(command\_t *cmd, int *cmd\_count)} -- разбивает команду с конвейером (\texttt{|}) на массив команд.
+    \item \texttt{execute\_pipeline(command\_t *cmd)} -- запускает команды конвейера.
+        \item Создаёт необходимое количество \texttt{pipe} для соединения команд.
+            \item Для каждой команды создаёт дочерний процесс.
+            \item В каждом дочернем процессе:
+                \begin{itemize}
+                    \item Настраивает \texttt{stdin}/\texttt{stdout} через \texttt{dup2} для соединения с соседними командами.
+                    \item Применяет перенаправления.
+                    \item Вызывает \texttt{execute\_command} для выполнения команды.
+            \item Родитель ждёт завершения всех команд.
+        \end{itemize}
+    \item \texttt{execute\_command\_sequence(command\_sequence\_t *seq)} -- выполняет последовательность команд с учётом логических связок (\texttt{;}, \texttt{\&\&}, \texttt{||}).
+        \item Выполняет команды по порядку.
+            \item Использует статус завершения предыдущей команды для решения, запускать ли следующую (для \texttt{\&\&} и \texttt{||}).
+    \item \texttt{execute\_command(command\_t *cmd)} -- главная функция выполнения команды.
+        \item Проверяет, содержит ли команда разделители (\texttt{;}, \texttt{\&\&}, \texttt{||}) и вызывает \texttt{execute\_command\_sequence}.
+            \item Проверяет, содержит ли команда конвейер (\texttt{|}) и вызывает \texttt{execute\_pipeline}.
+            \item Проверяет, является ли команда встроенной (\texttt{execute\_bash\_cmd}).
+            \item Вызывает \texttt{execute\_external} для внешних команд.
+\end{itemize}
+
+\lstinputlisting[language=C, caption={Содержимое executor.c}]{executor.c}
+
+\subsection{\texttt{cmdfrombash.c}}
+
+Содержит реализацию встроенных команд shell.
+
+\subsubsection{Функции}
+
+\item \texttt{from\_bash\_cd(char **args)} -- реализует команду \texttt{cd} (смена директории).
+    \item \texttt{from\_bash\_exit(char **args)} -- реализует команду \texttt{exit} (выход из shell).
+    \item \texttt{from\_path(char **args)} -- выводит текущее значение переменной \texttt{PATH}.
+    \item \texttt{set\_path(char **args)} -- устанавливает новое значение \texttt{PATH}.
+    \item \texttt{add\_to\_path(char **args)} -- добавляет директорию в \texttt{PATH}.
+    \item \texttt{reset\_path(char **args)} -- сбрасывает \texttt{PATH} к значению по умолчанию.
+    \item \texttt{execute\_bash\_cmd(char **args)} -- определяет, какую встроенную команду нужно выполнить, и вызывает соответствующую функцию. Возвращает -1, если команда не встроенная.
+
+\lstinputlisting[language=C, caption={Содержимое cmdfrombash.c}]{cmdfrombash.c}
+
+\subsection{\texttt{main.c}}
+
+Содержит точку входа в программу и основной цикл.
+
+\subsubsection{Функции}
+
+\item \texttt{check\_child(int sig)} -- обработчик сигнала \texttt{SIGCHLD}, вызывается при завершении фонового процесса.
+        \begin{itemize}
+            \item Использует \texttt{waitpid} с флагом \texttt{WNOHANG} для получения PID и статуса завершения.
+            \item Выводит сообщение о завершении.
+    \item \texttt{print\_dir()} -- возвращает строку с текущей директорией.
+    \item \texttt{read\_line()} -- читает строку ввода от пользователя.
+        \item Выводит приглашение (\texttt{>}) с текущей директорией.
+            \item Использует \texttt{getline} для чтения строки произвольной длины.
+    \item \texttt{main()} -- основной цикл программы.
+        \item Устанавливает обработчик сигнала.
+            \item В цикле:
+                \begin{itemize}
+                    \item Читает строку.
+                    \item Парсит её с помощью \texttt{parse\_input\_with\_separators}.
+                    \item Выполняет команду через \texttt{execute\_command\_sequence}.
+                    \item Освобождает память.
+            \item Завершается при получении EOF (Ctrl+D).
+        \end{itemize}
+\end{itemize}
+
+\lstinputlisting[language=C, caption={Содержимое main.c}]{main.c}
+
+\section{Соответствие требованиям задания}
+
+\item \textbf{Разбор пользовательского ввода:} Реализован в \texttt{parcer.c} с учётом кавычек, специальных символов, строк произвольной длины.
+    \item \textbf{Выполнение команд:} Реализовано в \texttt{executor.c} через \texttt{execv} и поиск по \texttt{PATH}.
+    \item \textbf{Встроенная команда \texttt{cd}:} Реализована в \texttt{cmdfrombash.c}.
+    \item \textbf{Фоновый режим (\texttt{\&}):} Реализован в \texttt{parse\_input} и \texttt{execute\_external}.
+    \item \textbf{Конвейер неограниченной длины:} Реализован в \texttt{execute\_pipeline}.
+    \item \textbf{Перенаправления:} Реализованы в \texttt{process\_redirections\_and\_pipes} и \texttt{apply\_redirections}.
+    \item \textbf{Логические операторы (\texttt{;}, \texttt{\&\&}, \texttt{||}):} Реализованы в \texttt{parse\_input\_with\_separators} и \texttt{execute\_command\_sequence}.
+    \item \textbf{Просмотр/модификация \texttt{PATH}:} Реализованы в \texttt{cmdfrombash.c} (\texttt{path}, \texttt{setpath}, \texttt{addpath}, \texttt{resetpath}).
+    \item \textbf{Модульность и отсутствие дублирования:} Код разделён на логические модули, каждая функция выполняет одну задачу.
+
+\end{document}
