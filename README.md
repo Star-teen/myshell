@@ -29,6 +29,7 @@
 
 ## 📁 Структура проекта
 myshell/
+
 ├── Makefile # Файл сборки
 
 ├── shell.h # Заголовочные файлы и структуры данных
@@ -70,28 +71,53 @@ gcc -o shell  main.c executor.c cmdfrombash.c parcer.c
 ```
 
 Пример сессии:
+
 Shell R v7.2
+
 Type 'exit' to quit. Or use Ctrl + D
+
 /home/user/myshell> pwd
+
 /home/user/myshell
+
 /home/user/myshell> echo "Hello, World!" > output.txt
+
 /home/user/myshell> cat < output.txt
+
 Hello, World!
+
 /home/user/myshell> ls | grep .c | wc -l
+
 3
+
 /home/user/myshell> path
+
 /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
 /home/user/myshell> setpath "/usr/local/bin:/bin"
+
 PATH set to: /usr/local/bin:/bin
+
 /home/user/myshell> echo test && echo success
+
 test
+
 success
+
 /home/user/myshell> false || echo "failed"
+
 failed
+
 /home/user/myshell> cd /tmp; pwd
+
 /tmp
+
 /home/user/myshell> sleep 2 &
+
 [1234] Started in fonius
+
 [1234] Finished with status 0
+
 /home/user/myshell> exit
+
 Goodbye!
