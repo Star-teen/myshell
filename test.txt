@@ -1,0 +1,139 @@
+Тесты для Shell-интерпретатора
+
+--- Подготовка ---
+1. Скомпилируйте ваш shell:
+   make  # или gcc -o myshell main.c parcer.c executor.c cmdfrombash.c -lreadline (если используете readline)
+2. Создайте временные файлы и директории для тестов:
+   mkdir -p /tmp/shell_test
+   cd /tmp/shell_test
+   echo "test content" > file1.txt
+   echo "another line" > file2.txt
+   touch empty_file.txt
+3. Запустите ваш shell:
+   ./myshell
+
+--- Тесты ---
+
+1. Разбор пользовательского ввода
+   1.1. Простые команды
+       - Команда: pwd
+         Ожидание: Вывод текущей директории.
+       - Команда: ls
+         Ожидание: Вывод списка файлов в текущей директории.
+   1.2. Аргументы команд
+       - Команда: ls -l
+         Ожидание: Вывод списка файлов с подробной информацией.
+       - Команда: echo Hello World
+         Ожидание: Вывод Hello World.
+   1.3. Кавычки
+       - Команда: echo "Hello World with spaces"
+         Ожидание: Вывод Hello World with spaces (один аргумент).
+       - Команда: echo 'Hello $USER'
+         Ожидание: Вывод Hello $USER (без подстановки переменной).
+       - Команда: echo "File: file with spaces.txt"
+         Ожидание: Команда echo получает один аргумент File: file with spaces.txt.
+   1.4. Специальные символы как токены
+       - Команда: echo abc > ef
+         Ожидание: Вывод abc перенаправляется в файл ef. Файл ef должен содержать abc.
+       - Команда: ls > files_list.txt; cat files_list.txt
+         Ожидание: Вывод ls сохраняется в files_list.txt, затем файл выводится.
+   1.5. Строки произвольной длины
+       - Команда: echo $(printf '%0.sA' {1..1000}) (генерирует строку из 1000 'A')
+         Ожидание: Shell не падает, выводит строку из 1000 'A'.
+
+2. Интерпретация команд
+   2.1. Встроенная команда cd
+       - Команда: cd /tmp
+         Проверка: pwd → должен вывести /tmp.
+       - Команда: cd shell_test
+         Проверка: pwd → должен вывести /tmp/shell_test.
+       - Команда: cd /nonexistent_directory
+         Ожидание: Сообщение об ошибке, директория не меняется.
+
+3. Фоновый режим (&)
+   3.1. Фоновая команда
+       - Команда: sleep 2 &
+         Ожидание: Shell сразу возвращает приглашение. Через 2 секунды должно появиться сообщение [<pid>] Finished with status 0.
+   3.2. Ошибка: & не в конце
+       - Команда: sleep 2 & echo done
+         Ожидание: Сообщение об ошибке: Error: '&' must be at the end of command.
+
+4. Конвейер (|) неограниченной длины
+   4.1. Конвейер из 2 команд
+       - Команда: ls | grep .txt
+         Ожидание: Вывод только файлов с расширением .txt.
+   4.2. Конвейер из 3 команд
+       - Команда: echo -e "apple\nbanana\ncherry" | sort | head -n 2
+         Ожидание: Вывод apple и banana.
+   4.3. Конвейер из 5 команд
+       - Команда: seq 1 10 | grep '[0-9]' | sort -r | head -n 5 | tail -n 1
+         Ожидание: Вывод 6.
+
+5. Перенаправления
+   5.1. > (перезапись)
+       - Команда: echo "New content" > test_out.txt
+         Проверка: Файл test_out.txt содержит New content, предыдущее содержимое утеряно.
+   5.2. >> (дописывание)
+       - Команда: echo "Appended line" >> test_out.txt
+         Проверка: Строка Appended line добавляется в конец test_out.txt.
+   5.3. < (ввод из файла)
+       - Команда: wc -l < file1.txt
+         Ожидание: Вывод 1 (количество строк в file1.txt).
+   5.4. 2> (перенаправление stderr)
+       - Команда: ls /nonexistent 2> error.txt
+         Проверка: Файл error.txt содержит сообщение об ошибке ls: cannot access....
+   5.5. 2>> (дописывание stderr)
+       - Команда: ls /nonexistent 2>> error.txt
+         Проверка: Сообщение об ошибке добавляется в error.txt.
+   5.6. 2>&1 (объединение stderr с stdout)
+       - Команда: ls file1.txt /nonexistent 2>&1 | grep "cannot access" > merged_error.txt
+         Проверка: Файл merged_error.txt содержит строку с ошибкой.
+
+6. Логические операторы
+   6.1. ; (последовательное выполнение)
+       - Команда: echo "First"; echo "Second"
+         Ожидание: Вывод First, затем Second, независимо от статуса первой команды.
+   6.2. && (выполнить, если успех)
+       - Команда: ls existing_file.txt && echo "File exists"
+         Ожидание: Вывод File exists.
+       - Команда: ls nonexistent_file.txt && echo "File exists"
+         Ожидание: Вывод ошибки ls, File exists не выводится.
+   6.3. || (выполнить, если ошибка)
+       - Команда: ls nonexistent_file.txt || echo "File does not exist"
+         Ожидание: Вывод ошибки ls, затем File does not exist.
+       - Команда: ls existing_file.txt || echo "File does not exist"
+         Ожидание: Вывод списка файлов, File does not exist не выводится.
+
+7. Просмотр и модификация PATH
+   7.1. path (просмотр)
+       - Команда: path
+         Ожидание: Вывод текущего значения переменной PATH.
+   7.2. setpath (установка)
+       - Команда: setpath "/usr/local/bin:/bin"
+         Проверка: path → должен вывести /usr/local/bin:/bin.
+         Проверка: Попробуйте запустить команду, которая теперь доступна или недоступна из-за нового PATH.
+   7.3. addpath (добавление в начало)
+       - Команда: addpath "/new/bin"
+         Проверка: path → /new/bin должен быть в начале.
+         Проверка: Запустите команду из /new/bin, если она там есть.
+   7.4. resetpath (сброс)
+       - Команда: resetpath
+         Проверка: path → должен вывести стандартный путь (указанный в reset_path).
+
+8. EOF (Ctrl+D)
+   - Действие: Нажмите Ctrl+D в пустой строке.
+     Ожидание: Shell завершает работу с сообщением Goodbye!.
+
+9. Комбинации команд
+   9.1. Конвейер + перенаправления
+       - Команда: ls -l | grep .txt > ls_filtered.txt
+         Проверка: Файл ls_filtered.txt содержит строки с .txt из вывода ls -l.
+   9.2. Логические операторы + перенаправления
+       - Команда: false || echo "Error occurred" > error_log.txt && echo "Success" > success_log.txt
+         Проверка: error_log.txt содержит Error occurred, success_log.txt не существует.
+   9.3. Конвейер + фон
+       - Команда: seq 1 5 | while read i; do echo $i; sleep 1; done &
+         Ожидание: Команда запускается в фоне, вывод появляется раз в секунду.
+   9.4. Сложная последовательность
+       - Команда: cd /tmp && ls | wc -l > file_count.txt && echo "Counted" >> log.txt || echo "Failed" >> log.txt
+         Проверка: Команда выполняется успешно: file_count.txt содержит число, log.txt содержит Counted.
